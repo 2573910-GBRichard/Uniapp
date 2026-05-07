@@ -30,3 +30,10 @@ dist-ssr
 .vercel
 node_modules
 dist
+
+.env
+.env.*
+!.env.example
+.vercel
+node_modules
+dist
