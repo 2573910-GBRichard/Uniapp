@@ -396,6 +396,34 @@ function formatRestaurantName(locationId, fallbackName) {
   return fallbackName || 'Unknown location'
 }
 
+function formatShortLocationName(value) {
+  if (!value) return 'Unknown'
+  const lowered = `${value}`.toLowerCase()
+  if (lowered.includes('gentle')) return 'Bens'
+  if (lowered.includes('bacio')) return 'Bacio'
+  if (lowered.includes('agave')) return 'Agave'
+  return value
+}
+
+function formatMonthDay(value) {
+  const parsed = parseEmployeeStartDate(value)
+  if (!parsed) return value || 'Unknown'
+  return parsed.toLocaleDateString('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+  })
+}
+
+function formatMonthDayYear(value) {
+  const parsed = parseEmployeeStartDate(value)
+  if (!parsed) return value || 'Unknown'
+  return parsed.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  })
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -980,7 +1008,7 @@ function HiringTrainingPage({ employeeRows, employeesLoading, employeesError, re
             <>
               <div className="helper-text">{selectedEmployee.location} • {selectedEmployee.role}</div>
               <div className="workflow-meta workflow-meta-two-up">
-                <div className="stack-item compact-card"><strong>Hire date</strong><span>{selectedEmployee.startDate || 'Unknown'}</span></div>
+                <div className="stack-item compact-card"><strong>Hire date</strong><span>{formatMonthDayYear(selectedEmployee.startDate)}</span></div>
                 <div className="stack-item compact-card"><strong>Details</strong><span>Phone and schedule info stay in the database, not on this screen.</span></div>
               </div>
               <TrainingWorkflowTable employee={selectedEmployee} steps={selectedEmployeeSteps.slice(0, 1)} onUpdateStep={updateTrainingStep} />
@@ -1620,9 +1648,9 @@ function EmployeeTable({ employeeRows, employeesLoading, employeesError, selecte
                 title={row.phone ? `Phone: ${row.phone}` : 'No phone on file'}
               >
                 <td>{row.name}</td>
-                <td><LocationCell row={row} /></td>
+                <td><LocationCell row={row} compact /></td>
                 <td>{row.role}</td>
-                <td>{row.startDate}</td>
+                <td>{formatMonthDay(row.startDate)}</td>
                 {steps.slice(0, 3).map((step) => (
                   <td key={step.id}>
                     <div className="day-column-cell">
@@ -1646,14 +1674,14 @@ function EmployeeTable({ employeeRows, employeesLoading, employeesError, selecte
   )
 }
 
-function LocationCell({ row }) {
+function LocationCell({ row, compact = false }) {
   const locations = Array.isArray(row.allLocations) ? row.allLocations : []
-  if (locations.length <= 1) return <span>{row.location}</span>
+  if (locations.length <= 1) return <span>{compact ? formatShortLocationName(row.location) : row.location}</span>
   const extraCount = locations.length - 1
   return (
     <details className="location-details">
-      <summary>{row.location} <span className="location-more">+{extraCount} more</span></summary>
-      <div className="location-menu">{locations.map((location) => <div key={location.id ?? location.name}>{location.name}</div>)}</div>
+      <summary>{compact ? formatShortLocationName(row.location) : row.location} <span className="location-more">+{extraCount} more</span></summary>
+      <div className="location-menu">{locations.map((location) => <div key={location.id ?? location.name}>{compact ? formatShortLocationName(location.name) : location.name}</div>)}</div>
     </details>
   )
 }
