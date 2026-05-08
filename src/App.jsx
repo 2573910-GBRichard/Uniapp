@@ -1050,6 +1050,8 @@ function SafeReconciliationPage({ accessProfile }) {
 
   const toastRestaurantGuids = {
     "Gentle Ben's": 'bc2c707a-62de-4ece-968a-cc4d3d400524',
+    'Bacio Italiano': '605d5c0d-4e2b-4299-8e29-20424dc6ea88',
+    'Agave House': 'cd3cfa74-9ed3-4f13-8230-a2015dbe393f',
   }
 
   const expectedSafe = (Number(startingSafe || 0) - Number(expectedDeposit || 0)).toFixed(2)
