@@ -79,13 +79,14 @@ function normalizeBusinessDate(value) {
 function summarizeCashEntries(entries = []) {
   const summary = {
     cashCollected: 0,
-    undoTipOutCollected: 0,
-    tipOut: 0,
-    payOut: 0,
+    cashIn: 0,
     cashOut: 0,
+    payOut: 0,
+    tipOut: 0,
+    undoPayOut: 0,
+    closeOutOverage: 0,
     closeOutShortage: 0,
-    otherNonPaymentEntries: 0,
-    nonPaymentEntryTotal: 0,
+    otherEntries: {},
   }
 
   if (!Array.isArray(entries)) {
@@ -96,25 +97,18 @@ function summarizeCashEntries(entries = []) {
     const amount = Number(entry?.amount || entry?.value || 0)
     if (Number.isNaN(amount)) continue
     const type = `${entry?.type || ''}`.toUpperCase()
-    const reason = `${entry?.reason || ''}`
 
-    if (type === 'CASH_COLLECTED') {
-      if (reason.includes('Undo Tip Out')) {
-        summary.undoTipOutCollected += amount
-        summary.nonPaymentEntryTotal += amount
-      } else {
-        summary.cashCollected += amount
-      }
-      continue
-    }
-
-    summary.nonPaymentEntryTotal += amount
-
-    if (type === 'TIP_OUT') summary.tipOut += amount
-    else if (type === 'PAY_OUT') summary.payOut += amount
-    else if (type === 'CASH_OUT') summary.cashOut += amount
+    if (type === 'CASH_COLLECTED') summary.cashCollected += amount
+    else if (type === 'CASH_IN') summary.cashIn += amount
+    else if (type === 'CASH_OUT') summary.cashOut += Math.abs(amount)
+    else if (type === 'PAY_OUT') summary.payOut += Math.abs(amount)
+    else if (type === 'TIP_OUT') summary.tipOut += Math.abs(amount)
+    else if (type === 'UNDO_PAY_OUT') summary.undoPayOut += amount
+    else if (type === 'CLOSE_OUT_OVERAGE') summary.closeOutOverage += amount
     else if (type === 'CLOSE_OUT_SHORTAGE') summary.closeOutShortage += amount
-    else if (type !== 'NO_SALE') summary.otherNonPaymentEntries += amount
+    else if (type && type !== 'NO_SALE') {
+      summary.otherEntries[type] = (summary.otherEntries[type] || 0) + amount
+    }
   }
 
   return summary
@@ -122,23 +116,38 @@ function summarizeCashEntries(entries = []) {
 
 function summarizeCashPayments(payments = []) {
   if (!Array.isArray(payments)) {
-    return { cashPayments: 0 }
+    return { totalCashPaymentsInDrawers: 0, excludedCashInHandPayments: 0, cashPaymentCount: 0 }
   }
 
-  const cashPayments = payments.reduce((sum, payment) => {
+  return payments.reduce((summary, payment) => {
+    if (payment?.error) return summary
     const isCash = `${payment?.type || ''}`.toUpperCase() === 'CASH'
     const amount = Number(payment?.amount || 0)
-    if (!isCash || Number.isNaN(amount)) return sum
-    return sum + amount
-  }, 0)
+    if (!isCash || Number.isNaN(amount)) return summary
 
-  return { cashPayments }
+    summary.cashPaymentCount += 1
+    if (payment?.cashDrawer) {
+      summary.totalCashPaymentsInDrawers += amount
+    } else {
+      summary.excludedCashInHandPayments += amount
+    }
+
+    return summary
+  }, { totalCashPaymentsInDrawers: 0, excludedCashInHandPayments: 0, cashPaymentCount: 0 })
 }
 
 function estimateExpectedDeposit(entrySummary, paymentSummary) {
-  const totalCashPayments = (paymentSummary?.cashPayments || 0)
-  const nonPaymentEntryTotal = (entrySummary?.nonPaymentEntryTotal || 0)
-  const total = totalCashPayments + nonPaymentEntryTotal
+  const total =
+    (paymentSummary?.totalCashPaymentsInDrawers || 0) +
+    (entrySummary?.cashCollected || 0) +
+    (entrySummary?.cashIn || 0) +
+    (entrySummary?.undoPayOut || 0) +
+    (entrySummary?.closeOutOverage || 0) -
+    (entrySummary?.cashOut || 0) -
+    (entrySummary?.payOut || 0) -
+    (entrySummary?.tipOut || 0) -
+    Math.abs(entrySummary?.closeOutShortage || 0)
+
   return Number.isFinite(total) ? total : null
 }
 
@@ -180,9 +189,6 @@ export default async function handler(req, res) {
     const entrySummary = summarizeCashEntries(entryList)
     const paymentSummary = summarizeCashPayments(paymentList)
     const expectedDepositEstimate = estimateExpectedDeposit(entrySummary, paymentSummary)
-    const impliedCashInHand = Number.isFinite((paymentSummary.cashPayments || 0) - (entrySummary.cashCollected || 0))
-      ? (paymentSummary.cashPayments || 0) - (entrySummary.cashCollected || 0)
-      : null
 
     return res.status(200).json({
       ok: true,
@@ -192,15 +198,14 @@ export default async function handler(req, res) {
       cashBreakdown: {
         ...entrySummary,
         ...paymentSummary,
-        impliedCashInHand,
       },
       cashEntries: entryList,
       payments: paymentList,
       deposits: depositList,
       notes: [
-        'This is the first Toast safe-summary pull scaffold.',
-        'Expected deposit may need a more exact Toast-specific formula based on entry types and cash-management rules.',
-        'Use this route to inspect the raw Toast cash-management payloads for the selected business date and location.',
+        'Toast expected deposit rule: cash payments in drawers + cash collected + cash-ins - cash-outs - payouts - tips/gratuities claimed during shift review.',
+        'Cash payments with null cashDrawer are excluded here to avoid double counting cash in hand that later becomes CASH_COLLECTED.',
+        'Use this route to inspect the Toast cash-management payloads for the selected business date and location.',
       ],
       entryError: entries?.error || null,
       depositError: deposits?.error || null,

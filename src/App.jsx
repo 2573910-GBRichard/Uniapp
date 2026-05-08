@@ -1043,10 +1043,46 @@ function SafeReconciliationPage({ accessProfile }) {
   const [expectedDeposit, setExpectedDeposit] = useState('')
   const [actualSafe, setActualSafe] = useState('')
   const [notes, setNotes] = useState('')
+  const [toastLoading, setToastLoading] = useState(false)
+  const [toastStatus, setToastStatus] = useState('')
+  const [toastBreakdown, setToastBreakdown] = useState(null)
   const canAccessSafe = safeLocations.length > 0
+
+  const toastRestaurantGuids = {
+    "Gentle Ben's": 'bc2c707a-62de-4ece-968a-cc4d3d400524',
+  }
 
   const expectedSafe = (Number(startingSafe || 0) - Number(expectedDeposit || 0)).toFixed(2)
   const variance = (Number(actualSafe || 0) - Number(expectedSafe || 0)).toFixed(2)
+
+  async function handlePullFromToast() {
+    const restaurantGuid = toastRestaurantGuids[restaurant]
+    if (!restaurantGuid) {
+      setToastStatus(`Toast pull is not configured yet for ${restaurant}.`)
+      return
+    }
+
+    setToastLoading(true)
+    setToastStatus('')
+
+    try {
+      const response = await fetch(`/api/toast-safe-summary?businessDate=${date}&restaurantGuid=${restaurantGuid}`)
+      const data = await response.json()
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || 'Unable to pull Toast safe summary.')
+      }
+
+      const pulledDeposit = Number(data?.expectedDepositEstimate || 0)
+      setExpectedDeposit(pulledDeposit.toFixed(2))
+      setToastBreakdown(data?.cashBreakdown || null)
+      setToastStatus(`Pulled Toast expected deposit: $${pulledDeposit.toFixed(2)}`)
+    } catch (error) {
+      setToastStatus(error.message || 'Unable to pull Toast safe summary.')
+      setToastBreakdown(null)
+    } finally {
+      setToastLoading(false)
+    }
+  }
 
   async function handleSave() {
     if (!canAccessSafe) return
@@ -1142,6 +1178,17 @@ function SafeReconciliationPage({ accessProfile }) {
               Notes
               <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows="4" />
             </label>
+            <div className="topbar-actions" style={{ marginBottom: 16 }}>
+              <button type="button" className="secondary-button" onClick={handlePullFromToast} disabled={toastLoading}>
+                {toastLoading ? 'Pulling from Toast...' : 'Pull from Toast'}
+              </button>
+            </div>
+            {toastStatus ? <div className="helper-text">{toastStatus}</div> : null}
+            {toastBreakdown ? (
+              <div className="helper-text">
+                Payments in drawers: ${Number(toastBreakdown.totalCashPaymentsInDrawers || 0).toFixed(2)} | Cash collected: ${Number(toastBreakdown.cashCollected || 0).toFixed(2)} | Cash in: ${Number(toastBreakdown.cashIn || 0).toFixed(2)} | Cash out: ${Number(toastBreakdown.cashOut || 0).toFixed(2)} | Pay out: ${Number(toastBreakdown.payOut || 0).toFixed(2)} | Tip out: ${Number(toastBreakdown.tipOut || 0).toFixed(2)}
+              </div>
+            ) : null}
             <div className="metrics-grid safe-metrics-grid">
               <article className="panel metric-card">
                 <span className="metric-label">Expected safe</span>
