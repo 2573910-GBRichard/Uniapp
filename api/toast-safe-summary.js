@@ -76,29 +76,69 @@ function normalizeBusinessDate(value) {
   return trimmed.replaceAll('-', '')
 }
 
-function estimateExpectedDeposit(entries = [], payments = []) {
-  const paymentSum = Array.isArray(payments)
-    ? payments.reduce((sum, payment) => {
-        const isCash = `${payment?.type || ''}`.toUpperCase() === 'CASH'
-        const amount = Number(payment?.amount || 0)
-        if (!isCash || Number.isNaN(amount)) return sum
-        return sum + amount
-      }, 0)
-    : 0
+function summarizeCashEntries(entries = []) {
+  const summary = {
+    cashCollected: 0,
+    undoTipOutCollected: 0,
+    tipOut: 0,
+    payOut: 0,
+    cashOut: 0,
+    closeOutShortage: 0,
+    otherNonPaymentEntries: 0,
+    nonPaymentEntryTotal: 0,
+  }
 
-  const entrySum = Array.isArray(entries)
-    ? entries.reduce((sum, entry) => {
-        const amount = Number(entry?.amount || entry?.value || 0)
-        if (Number.isNaN(amount)) return sum
-        const type = `${entry?.type || ''}`.toUpperCase()
-        const reason = `${entry?.reason || ''}`
-        const isUndoTipOut = type === 'CASH_COLLECTED' && reason.includes('Undo Tip Out')
-        if (type === 'CASH_COLLECTED' && !isUndoTipOut) return sum
-        return sum + amount
-      }, 0)
-    : 0
+  if (!Array.isArray(entries)) {
+    return summary
+  }
 
-  const total = paymentSum + entrySum
+  for (const entry of entries) {
+    const amount = Number(entry?.amount || entry?.value || 0)
+    if (Number.isNaN(amount)) continue
+    const type = `${entry?.type || ''}`.toUpperCase()
+    const reason = `${entry?.reason || ''}`
+
+    if (type === 'CASH_COLLECTED') {
+      if (reason.includes('Undo Tip Out')) {
+        summary.undoTipOutCollected += amount
+        summary.nonPaymentEntryTotal += amount
+      } else {
+        summary.cashCollected += amount
+      }
+      continue
+    }
+
+    summary.nonPaymentEntryTotal += amount
+
+    if (type === 'TIP_OUT') summary.tipOut += amount
+    else if (type === 'PAY_OUT') summary.payOut += amount
+    else if (type === 'CASH_OUT') summary.cashOut += amount
+    else if (type === 'CLOSE_OUT_SHORTAGE') summary.closeOutShortage += amount
+    else if (type !== 'NO_SALE') summary.otherNonPaymentEntries += amount
+  }
+
+  return summary
+}
+
+function summarizeCashPayments(payments = []) {
+  if (!Array.isArray(payments)) {
+    return { cashPayments: 0 }
+  }
+
+  const cashPayments = payments.reduce((sum, payment) => {
+    const isCash = `${payment?.type || ''}`.toUpperCase() === 'CASH'
+    const amount = Number(payment?.amount || 0)
+    if (!isCash || Number.isNaN(amount)) return sum
+    return sum + amount
+  }, 0)
+
+  return { cashPayments }
+}
+
+function estimateExpectedDeposit(entrySummary, paymentSummary) {
+  const totalCashPayments = (paymentSummary?.cashPayments || 0)
+  const nonPaymentEntryTotal = (entrySummary?.nonPaymentEntryTotal || 0)
+  const total = totalCashPayments + nonPaymentEntryTotal
   return Number.isFinite(total) ? total : null
 }
 
@@ -137,12 +177,23 @@ export default async function handler(req, res) {
       }),
     )
     const paymentList = payments.filter(Boolean)
+    const entrySummary = summarizeCashEntries(entryList)
+    const paymentSummary = summarizeCashPayments(paymentList)
+    const expectedDepositEstimate = estimateExpectedDeposit(entrySummary, paymentSummary)
+    const impliedCashInHand = Number.isFinite((paymentSummary.cashPayments || 0) - (entrySummary.cashCollected || 0))
+      ? (paymentSummary.cashPayments || 0) - (entrySummary.cashCollected || 0)
+      : null
 
     return res.status(200).json({
       ok: true,
       businessDate,
       restaurantGuid,
-      expectedDepositEstimate: estimateExpectedDeposit(entryList, paymentList),
+      expectedDepositEstimate,
+      cashBreakdown: {
+        ...entrySummary,
+        ...paymentSummary,
+        impliedCashInHand,
+      },
       cashEntries: entryList,
       payments: paymentList,
       deposits: depositList,
