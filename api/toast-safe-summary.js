@@ -70,16 +70,35 @@ async function fetchToastJson(path, accessToken, restaurantGuid, query = {}) {
   return data
 }
 
-function estimateExpectedDeposit(entries = []) {
-  if (!Array.isArray(entries)) return null
+function normalizeBusinessDate(value) {
+  const trimmed = `${value || ''}`.trim()
+  if (!trimmed) return ''
+  return trimmed.replaceAll('-', '')
+}
 
-  let total = 0
-  for (const entry of entries) {
-    const amount = Number(entry?.amount || entry?.value || 0)
-    if (Number.isNaN(amount)) continue
-    total += amount
-  }
+function estimateExpectedDeposit(entries = [], payments = []) {
+  const paymentSum = Array.isArray(payments)
+    ? payments.reduce((sum, payment) => {
+        const isCash = `${payment?.type || ''}`.toUpperCase() === 'CASH'
+        const amount = Number(payment?.amount || 0)
+        if (!isCash || Number.isNaN(amount)) return sum
+        return sum + amount
+      }, 0)
+    : 0
 
+  const entrySum = Array.isArray(entries)
+    ? entries.reduce((sum, entry) => {
+        const amount = Number(entry?.amount || entry?.value || 0)
+        if (Number.isNaN(amount)) return sum
+        const type = `${entry?.type || ''}`.toUpperCase()
+        const reason = `${entry?.reason || ''}`
+        const isUndoTipOut = type === 'CASH_COLLECTED' && reason.includes('Undo Tip Out')
+        if (type === 'CASH_COLLECTED' && !isUndoTipOut) return sum
+        return sum + amount
+      }, 0)
+    : 0
+
+  const total = paymentSum + entrySum
   return Number.isFinite(total) ? total : null
 }
 
@@ -88,7 +107,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const businessDate = `${req.query?.businessDate || ''}`.trim()
+  const businessDate = normalizeBusinessDate(req.query?.businessDate)
   const restaurantGuid = `${req.query?.restaurantGuid || ''}`.trim()
 
   if (!businessDate || !restaurantGuid) {
@@ -101,20 +120,31 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getToastAccessToken()
 
-    const [entries, deposits] = await Promise.all([
+    const [entries, deposits, paymentsIndex] = await Promise.all([
       fetchToastJson('cashmgmt/v1/entries', accessToken, restaurantGuid, { businessDate }).catch((error) => ({ error: error.message })),
       fetchToastJson('cashmgmt/v1/deposits', accessToken, restaurantGuid, { businessDate }).catch((error) => ({ error: error.message })),
+      fetchToastJson('orders/v2/payments', accessToken, restaurantGuid, { paidBusinessDate: businessDate }).catch((error) => ({ error: error.message })),
     ])
 
     const entryList = Array.isArray(entries) ? entries : Array.isArray(entries?.results) ? entries.results : []
     const depositList = Array.isArray(deposits) ? deposits : Array.isArray(deposits?.results) ? deposits.results : []
+    const paymentIds = Array.isArray(paymentsIndex) ? paymentsIndex : Array.isArray(paymentsIndex?.results) ? paymentsIndex.results : []
+    const payments = await Promise.all(
+      paymentIds.map((payment) => {
+        const guid = typeof payment === 'string' ? payment : payment?.guid
+        if (!guid) return null
+        return fetchToastJson(`orders/v2/payments/${guid}`, accessToken, restaurantGuid).catch((error) => ({ error: error.message, guid }))
+      }),
+    )
+    const paymentList = payments.filter(Boolean)
 
     return res.status(200).json({
       ok: true,
       businessDate,
       restaurantGuid,
-      expectedDepositEstimate: estimateExpectedDeposit(entryList),
+      expectedDepositEstimate: estimateExpectedDeposit(entryList, paymentList),
       cashEntries: entryList,
+      payments: paymentList,
       deposits: depositList,
       notes: [
         'This is the first Toast safe-summary pull scaffold.',
@@ -123,6 +153,7 @@ export default async function handler(req, res) {
       ],
       entryError: entries?.error || null,
       depositError: deposits?.error || null,
+      paymentError: paymentsIndex?.error || null,
     })
   } catch (error) {
     return res.status(500).json({
