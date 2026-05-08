@@ -102,8 +102,8 @@ export default async function handler(req, res) {
     const accessToken = await getToastAccessToken()
 
     const [entries, deposits] = await Promise.all([
-      fetchToastJson('cashmanagement/v1/entries', accessToken, restaurantGuid, { businessDate }).catch((error) => ({ error: error.message })),
-      fetchToastJson('cashmanagement/v1/deposits', accessToken, restaurantGuid, { businessDate }).catch((error) => ({ error: error.message })),
+      fetchToastJson('cashmgmt/v1/entries', accessToken, restaurantGuid, { businessDate }).catch((error) => ({ error: error.message })),
+      fetchToastJson('cashmgmt/v1/deposits', accessToken, restaurantGuid, { businessDate }).catch((error) => ({ error: error.message })),
     ])
 
     const entryList = Array.isArray(entries) ? entries : Array.isArray(entries?.results) ? entries.results : []
