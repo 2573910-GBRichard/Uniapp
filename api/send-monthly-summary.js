@@ -36,7 +36,6 @@ export default async function handler(req, res) {
   }
 
   const sender = process.env.MS_SENDER_EMAIL
-  const recipient = process.env.MONTHLY_SUMMARY_RECIPIENT || sender
 
   if (!sender) {
     return res.status(500).json({ error: 'Missing sender email configuration' })
@@ -44,7 +43,12 @@ export default async function handler(req, res) {
 
   try {
     const accessToken = await getAccessToken()
-    const { subject, html } = req.body || {}
+    const { subject, html, toRecipients, ccRecipients } = req.body || {}
+    const fallbackRecipient = process.env.MONTHLY_SUMMARY_RECIPIENT || sender
+    const toList = Array.isArray(toRecipients) && toRecipients.length
+      ? toRecipients
+      : [fallbackRecipient]
+    const ccList = Array.isArray(ccRecipients) ? ccRecipients : []
 
     const response = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`, {
       method: 'POST',
@@ -59,13 +63,12 @@ export default async function handler(req, res) {
             contentType: 'HTML',
             content: html || '<p>Monthly summary placeholder.</p>',
           },
-          toRecipients: [
-            {
-              emailAddress: {
-                address: recipient,
-              },
-            },
-          ],
+          toRecipients: toList.map((address) => ({
+            emailAddress: { address },
+          })),
+          ccRecipients: ccList.map((address) => ({
+            emailAddress: { address },
+          })),
         },
         saveToSentItems: true,
       }),
