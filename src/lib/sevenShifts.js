@@ -52,6 +52,7 @@ export async function fetchSevenShiftsUsers() {
   const payload = await response.json()
   const results = Array.isArray(payload.results) ? payload.results : []
   const workingTodayIds = new Set(Array.isArray(payload.workingTodayUserIds) ? payload.workingTodayUserIds : [])
+  const todayShifts = Array.isArray(payload.todayShifts) ? payload.todayShifts : []
 
   return results.map((user) => {
     const roleAssignments = Array.isArray(user.role_assignments) ? user.role_assignments : []
@@ -62,6 +63,8 @@ export async function fetchSevenShiftsUsers() {
     const primaryLocation = normalizedLocations[0]?.name || 'Unassigned'
     const mobileNumber = user.mobile_number || ''
     const homeNumber = user.home_number || ''
+
+    const scheduledShiftsToday = todayShifts.filter((shift) => shift?.user_id === user.id)
 
     return {
       id: user.id,
@@ -80,6 +83,8 @@ export async function fetchSevenShiftsUsers() {
       mobileNumber,
       homeNumber,
       workingToday: workingTodayIds.has(user.id),
+      scheduledToday: scheduledShiftsToday.length > 0,
+      scheduledShiftsToday,
       active: user.active,
     }
   })

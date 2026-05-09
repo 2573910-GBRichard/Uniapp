@@ -28,14 +28,12 @@ function getDateRangeForToday() {
   return { startDate: today, endDate: today }
 }
 
-async function fetchTodayShiftUserIds(companyId, apiKey) {
+async function fetchTodayShifts(companyId, apiKey) {
   const { startDate, endDate } = getDateRangeForToday()
 
   try {
     const payload = await fetchJson(`https://api.7shifts.com/v2/company/${companyId}/shifts?start_date=${startDate}&end_date=${endDate}`, apiKey)
-    const results = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.results) ? payload.results : []
-
-    return Array.from(new Set(results.map((shift) => shift?.user_id).filter(Boolean)))
+    return Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.results) ? payload.results : []
   } catch (error) {
     console.warn('Unable to load today\'s shifts from 7shifts:', error.message)
     return []
@@ -112,10 +110,12 @@ export default async function handler(request, response) {
   }
 
   try {
-    const [users, workingTodayUserIds] = await Promise.all([
+    const [users, todayShifts] = await Promise.all([
       fetchAllUsers(company_id, apiKey),
-      fetchTodayShiftUserIds(company_id, apiKey),
+      fetchTodayShifts(company_id, apiKey),
     ])
+
+    const workingTodayUserIds = Array.from(new Set(todayShifts.map((shift) => shift?.user_id).filter(Boolean)))
 
     const enrichedUsers = await Promise.all(
       users.map(async (user) => {
@@ -132,7 +132,7 @@ export default async function handler(request, response) {
       }),
     )
 
-    return response.status(200).json({ results: enrichedUsers, count: enrichedUsers.length, workingTodayUserIds })
+    return response.status(200).json({ results: enrichedUsers, count: enrichedUsers.length, workingTodayUserIds, todayShifts })
   } catch (error) {
     return response.status(500).json({ error: error.message || 'Failed to load 7shifts users' })
   }
